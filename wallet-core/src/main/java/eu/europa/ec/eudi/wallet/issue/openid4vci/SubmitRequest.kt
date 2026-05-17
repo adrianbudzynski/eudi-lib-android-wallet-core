@@ -17,6 +17,8 @@
 package eu.europa.ec.eudi.wallet.issue.openid4vci
 
 import eu.europa.ec.eudi.openid4vci.AuthorizedRequest
+import eu.europa.ec.eudi.openid4vci.CredentialConfigurationIdentifier
+import eu.europa.ec.eudi.openid4vci.CredentialIdentifier
 import eu.europa.ec.eudi.openid4vci.IssuanceRequestPayload
 import eu.europa.ec.eudi.openid4vci.Issuer
 import eu.europa.ec.eudi.openid4vci.KeyAttestationJWT
@@ -39,6 +41,13 @@ internal class SubmitRequest(
     var authorizedRequest: AuthorizedRequest = authorizedRequest
         private set
 
+    private val credentialIdentifierQueues:
+        MutableMap<CredentialConfigurationIdentifier, ArrayDeque<CredentialIdentifier>> =
+        authorizedRequest.credentialIdentifiers
+            ?.mapValues { (_, identifiers) -> ArrayDeque(identifiers) }
+            ?.toMutableMap()
+            ?: mutableMapOf()
+
     suspend fun request(offeredDocuments: Map<UnsignedDocument, Offer.OfferedDocument>): Response {
         return Response(offeredDocuments.mapValues { (unsignedDocument, offeredDocument) ->
             try {
@@ -58,8 +67,7 @@ internal class SubmitRequest(
         offeredDocument: Offer.OfferedDocument,
         keyUnlockData: Map<KeyAlias, KeyUnlockData?>? = null,
     ): ResponseResult<SubmissionOutcome> {
-        val payload =
-            IssuanceRequestPayload.ConfigurationBased(offeredDocument.configurationIdentifier)
+        val payload = resolveIssuanceRequestPayload(offeredDocument)
         val signers = unsignedDocument.getPoPSigners().toList()
 
         val (updatedAuthorizedRequest, outcome) = when (config.clientAuthenticationType) {
@@ -89,6 +97,18 @@ internal class SubmitRequest(
             keyAliases = signers.map { it.keyAlias },
             outcome = outcome
         )
+    }
+
+    private fun resolveIssuanceRequestPayload(
+        offeredDocument: Offer.OfferedDocument,
+    ): IssuanceRequestPayload {
+        val configId = offeredDocument.configurationIdentifier
+        val authorizedId = credentialIdentifierQueues[configId]?.removeFirstOrNull()
+        return if (authorizedId != null) {
+            IssuanceRequestPayload.IdentifierBased(configId, authorizedId)
+        } else {
+            IssuanceRequestPayload.ConfigurationBased(configId)
+        }
     }
 
     private suspend fun requestWithNoAuthentication(
