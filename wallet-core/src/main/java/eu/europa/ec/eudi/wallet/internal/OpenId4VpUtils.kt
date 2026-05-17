@@ -335,6 +335,7 @@ internal suspend fun SdJwt<JwtAndClaims>.serializeWithKeyBinding(
     signatureAlgorithm: Algorithm,
     issueDate: Date,
     transactionData: List<TransactionData>? = null,
+    scaKbJwtClaims: ScaKbJwtClaims? = null,
 ): String {
     val algorithm = JWSAlgorithm.parse((signatureAlgorithm).joseAlgorithmIdentifier)
     val publicKey = credential.secureArea.getKeyInfo(credential.alias).publicKey
@@ -366,6 +367,11 @@ internal suspend fun SdJwt<JwtAndClaims>.serializeWithKeyBinding(
             claim(TransactionDataHashing.CLAIM_TRANSACTION_DATA_HASHES, hashes)
             claim(TransactionDataHashing.CLAIM_TRANSACTION_DATA_HASHES_ALG, alg)
         }
+        scaKbJwtClaims?.let { sca ->
+            claim(ScaKbJwtClaims.CLAIM_JTI, sca.jti)
+            claim(ScaKbJwtClaims.CLAIM_RESPONSE_MODE, sca.responseMode)
+            claim(ScaKbJwtClaims.CLAIM_AMR, sca.amr)
+        }
     }
     return serializeWithKeyBinding(buildKbJwt).getOrThrow()
 }
@@ -393,6 +399,7 @@ internal suspend fun verifiablePresentationForSdJwtVc(
     disclosedDocument: DisclosedDocument,
     signatureAlgorithm: Algorithm,
     queryId: QueryId? = null,
+    scaKbJwtClaims: ScaKbJwtClaims? = null,
 ): VerifiablePresentation.Generic {
     return document.consumingCredential {
         val credentialIssuedData =
@@ -427,6 +434,7 @@ internal suspend fun verifiablePresentationForSdJwtVc(
                 signatureAlgorithm = signatureAlgorithm,
                 issueDate = Date(),
                 transactionData = transactionData,
+                scaKbJwtClaims = scaKbJwtClaims,
             )
         } else {
             presentation.serialize()
