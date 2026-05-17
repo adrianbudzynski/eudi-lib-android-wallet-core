@@ -25,7 +25,7 @@ import java.util.Base64
 /**
  * Computes OpenID4VP transaction-data digests for KB-JWT dynamic linking.
  *
- * @see <a href="https://github.com/openid/OpenID4VP/issues/457">OpenID4VP #457</a>
+ * @see <a href="https://openid.net/specs/openid-4-verifiable-presentations-1_0.html#name-transaction-data-in-sd-jwt">OpenID4VP 1.0 B.3.3.1</a>
  */
 internal object TransactionDataHashing {
     const val CLAIM_TRANSACTION_DATA_HASHES: String = "transaction_data_hashes"
@@ -59,6 +59,10 @@ internal object TransactionDataHashing {
 
     /**
      * Hashes a single base64url-encoded [transactionDataValue] using [algorithm].
+     *
+     * Per OpenID4VP 1.0, hashing is over the string as received in `transaction_data`
+     * (base64url decoding is not performed before hashing).
+     *
      * The digest is returned base64url-encoded without padding.
      */
     fun hashTransactionData(transactionDataValue: String, algorithm: HashAlgorithm): String {
@@ -66,8 +70,8 @@ internal object TransactionDataHashing {
             HashAlgorithm.SHA_256 -> "SHA-256"
             else -> throw IllegalArgumentException("Unsupported hash algorithm: ${algorithm.name}")
         }
-        val decoded = Base64.getUrlDecoder().decode(transactionDataValue)
-        val digest = MessageDigest.getInstance(digestAlgorithm).digest(decoded)
+        val digest = MessageDigest.getInstance(digestAlgorithm)
+            .digest(transactionDataValue.toByteArray(Charsets.UTF_8))
         return Base64.getUrlEncoder().withoutPadding().encodeToString(digest)
     }
 
