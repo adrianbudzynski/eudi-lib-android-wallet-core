@@ -23,6 +23,7 @@ import eu.europa.ec.eudi.iso18013.transfer.response.RequestedDocuments
 import eu.europa.ec.eudi.iso18013.transfer.response.ResponseResult
 import eu.europa.ec.eudi.openid4vp.Consensus
 import eu.europa.ec.eudi.openid4vp.ResolvedRequestObject
+import eu.europa.ec.eudi.openid4vp.TransactionData
 import eu.europa.ec.eudi.openid4vp.VerifiablePresentation
 import eu.europa.ec.eudi.openid4vp.VerifiablePresentations
 import eu.europa.ec.eudi.openid4vp.dcql.QueryId
@@ -63,6 +64,13 @@ class ProcessedDcqlRequest(
     private val queryMap: RequestedDocumentsByQueryId,
     val msoMdocNonce: String,
 ) : RequestProcessor.ProcessedRequest.Success(RequestedDocuments(queryMap.flatMap { it.value.requestedDocuments })) {
+
+    /**
+     * Resolved transaction data from the authorization request, when the verifier supplied any.
+     */
+    val transactionData: List<TransactionData>?
+        get() = resolvedRequestObject.transactionData
+
     /**
      * Generates an OpenID4VP response with verifiable presentations for the selected documents.
      *
@@ -104,6 +112,7 @@ class ProcessedDcqlRequest(
                         val verifiablePresentation = runBlocking {
                             vpFromRequestedDocuments(
                                 format = format,
+                                queryId = queryId,
                                 requestedDocuments = requestedDocuments,
                                 disclosedDocument = disclosedDocument,
                                 signatureAlgorithm = signatureAlgorithm ?: Algorithm.ESP256
@@ -149,9 +158,10 @@ class ProcessedDcqlRequest(
      */
     private suspend fun vpFromRequestedDocuments(
         format: String,
+        queryId: QueryId,
         requestedDocuments: RequestedDocuments,
         disclosedDocument: DisclosedDocument,
-        signatureAlgorithm: Algorithm
+        signatureAlgorithm: Algorithm,
     ): VerifiablePresentation.Generic {
         val documentId = disclosedDocument.documentId
         // Retrieve the full document from the document manager
@@ -187,7 +197,8 @@ class ProcessedDcqlRequest(
                     resolvedRequestObject = resolvedRequestObject,
                     document = document,
                     disclosedDocument = disclosedDocument,
-                    signatureAlgorithm = signatureAlgorithm
+                    signatureAlgorithm = signatureAlgorithm,
+                    queryId = queryId,
                 )
             }
 

@@ -48,6 +48,8 @@ import eu.europa.ec.eudi.openid4vp.JwkSetSource.ByReference
 import eu.europa.ec.eudi.openid4vp.OpenId4VPConfig
 import eu.europa.ec.eudi.openid4vp.PreregisteredClient
 import eu.europa.ec.eudi.openid4vp.ResolvedRequestObject
+import eu.europa.ec.eudi.openid4vp.TransactionData
+import eu.europa.ec.eudi.openid4vp.dcql.QueryId
 import eu.europa.ec.eudi.openid4vp.ResponseEncryptionConfiguration
 import eu.europa.ec.eudi.openid4vp.ResponseMode
 import eu.europa.ec.eudi.openid4vp.SupportedClientIdPrefix
@@ -223,7 +225,8 @@ internal fun makeOpenId4VPConfig(
             supportedMethods = config.encryptionMethods.map { it.nimbus }
         ),
         vpConfiguration = VPConfiguration(
-            vpFormatsSupported = config.formats.toVpFormats()
+            vpFormatsSupported = config.formats.toVpFormats(),
+            supportedTransactionDataTypes = config.supportedTransactionDataTypes,
         ),
         supportedClientIdPrefixes = supportedClientIdPrefixes
     )
@@ -331,6 +334,7 @@ internal suspend fun SdJwt<JwtAndClaims>.serializeWithKeyBinding(
     nonce: String,
     signatureAlgorithm: Algorithm,
     issueDate: Date,
+    transactionData: List<TransactionData>? = null,
 ): String {
     val algorithm = JWSAlgorithm.parse((signatureAlgorithm).joseAlgorithmIdentifier)
     val publicKey = credential.secureArea.getKeyInfo(credential.alias).publicKey
@@ -358,9 +362,20 @@ internal suspend fun SdJwt<JwtAndClaims>.serializeWithKeyBinding(
         audience(clientId.clientId)
         claim("nonce", nonce)
         issueTime(issueDate)
+        transactionData?.let(TransactionDataHashing::kbJwtTransactionDataClaims)?.let { (hashes, alg) ->
+            claim(TransactionDataHashing.CLAIM_TRANSACTION_DATA_HASHES, hashes)
+            claim(TransactionDataHashing.CLAIM_TRANSACTION_DATA_HASHES_ALG, alg)
+        }
     }
     return serializeWithKeyBinding(buildKbJwt).getOrThrow()
 }
+
+internal fun ResolvedRequestObject.transactionDataForQuery(
+    queryId: QueryId,
+): List<TransactionData>? =
+    transactionData
+        ?.filter { queryId in it.credentialIds }
+        ?.takeIf { it.isNotEmpty() }
 
 /**
  * Constructs a verifiable presentation for an SD-JWT VC credential.
@@ -377,6 +392,7 @@ internal suspend fun verifiablePresentationForSdJwtVc(
     document: IssuedDocument,
     disclosedDocument: DisclosedDocument,
     signatureAlgorithm: Algorithm,
+    queryId: QueryId? = null,
 ): VerifiablePresentation.Generic {
     return document.consumingCredential {
         val credentialIssuedData =
@@ -398,6 +414,8 @@ internal suspend fun verifiablePresentationForSdJwtVc(
             ?: throw IllegalArgumentException("Failed to create SD JWT VC presentation")
 
         val containsCnf = issuedSdJwt.jwt.second["cnf"] != null
+        val transactionData = queryId?.let(resolvedRequestObject::transactionDataForQuery)
+            ?: resolvedRequestObject.transactionData
 
         // If the SD-JWT contains a 'cnf' claim, serialize with key binding
         val serialized = if (containsCnf) {
@@ -407,7 +425,8 @@ internal suspend fun verifiablePresentationForSdJwtVc(
                 clientId = resolvedRequestObject.client.id,
                 nonce = resolvedRequestObject.nonce,
                 signatureAlgorithm = signatureAlgorithm,
-                issueDate = Date()
+                issueDate = Date(),
+                transactionData = transactionData,
             )
         } else {
             presentation.serialize()
