@@ -53,6 +53,7 @@ class TransactionsListener(
                     ?.issuerMetadata
                     ?.toJson()
                 TransactionLog.Metadata(
+                    documentId = id.toString(),
                     issuerMetadata = issuerMetadata,
                     format = FORMAT_MSO_MDOC,
                     index = index,
@@ -66,6 +67,7 @@ class TransactionsListener(
                         ?.issuerMetadata
                         ?.toJson()
                     TransactionLog.Metadata(
+                        documentId = document.documentId.toString(),
                         issuerMetadata = issuerMetadata,
                         format = document.format,
                         index = index,
@@ -79,6 +81,7 @@ class TransactionsListener(
                     ?.issuerMetadata
                     ?.toJson()
                 TransactionLog.Metadata(
+                    documentId = id.toString(),
                     issuerMetadata = issuerMetadata,
                     format = FORMAT_MSO_MDOC,
                     index = index,

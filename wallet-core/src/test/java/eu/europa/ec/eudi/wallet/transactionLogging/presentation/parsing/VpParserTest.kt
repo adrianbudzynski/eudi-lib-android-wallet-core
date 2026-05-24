@@ -30,6 +30,7 @@ class VpParserTest {
 
     private val metadata = listOf(
         TransactionLog.Metadata(
+            documentId = "doc-sd-jwt",
             index = 0,
             queryId = "query-0",
             format = FORMAT_SD_JWT_VC,
@@ -42,6 +43,7 @@ class VpParserTest {
             ).toJson()
         ).toJson(),
         TransactionLog.Metadata(
+            documentId = "doc-mdoc",
             index = 0,
             queryId = "query-1",
             format = FORMAT_MSO_MDOC,

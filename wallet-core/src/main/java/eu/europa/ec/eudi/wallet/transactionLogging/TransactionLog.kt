@@ -115,10 +115,11 @@ data class TransactionLog(
 
     @Serializable
     data class Metadata(
+        val documentId: String,
         val issuerMetadata: String?,
         val format: String,
         val index: Int,
-        val queryId: String? = null
+        val queryId: String? = null,
     ) {
         override fun toString(): String {
             return issuerMetadata ?: ""
