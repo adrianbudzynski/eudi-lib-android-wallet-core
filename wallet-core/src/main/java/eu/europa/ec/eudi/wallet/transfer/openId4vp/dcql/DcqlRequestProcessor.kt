@@ -94,14 +94,6 @@ class DcqlRequestProcessor(
             // Validate request type and structure
             require(request is OpenId4VpRequest) { "Request must be an OpenId4VpRequest" }
 
-            // Temporarily reject all requests with transaction data (not yet supported)
-            val requestTransactionData = request.resolvedRequestObject.transactionData
-            if (!requestTransactionData.isNullOrEmpty()) {
-                return RequestProcessor.ProcessedRequest.Failure(
-                    IllegalArgumentException("Transaction data is not supported")
-                )
-            }
-
             val dcql = request.resolvedRequestObject.query
             val credentials = dcql.credentials
             val credentialSets = dcql.credentialSets

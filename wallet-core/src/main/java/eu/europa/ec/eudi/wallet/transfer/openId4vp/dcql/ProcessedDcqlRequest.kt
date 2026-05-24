@@ -23,6 +23,7 @@ import eu.europa.ec.eudi.iso18013.transfer.response.RequestedDocuments
 import eu.europa.ec.eudi.iso18013.transfer.response.ResponseResult
 import eu.europa.ec.eudi.openid4vp.Consensus
 import eu.europa.ec.eudi.openid4vp.ResolvedRequestObject
+import eu.europa.ec.eudi.openid4vp.TransactionData
 import eu.europa.ec.eudi.openid4vp.VerifiablePresentation
 import eu.europa.ec.eudi.openid4vp.VerifiablePresentations
 import eu.europa.ec.eudi.openid4vp.dcql.QueryId
@@ -30,9 +31,12 @@ import eu.europa.ec.eudi.wallet.document.DocumentManager
 import eu.europa.ec.eudi.wallet.document.IssuedDocument
 import eu.europa.ec.eudi.wallet.document.format.MsoMdocFormat
 import eu.europa.ec.eudi.wallet.document.format.SdJwtVcFormat
+import eu.europa.ec.eudi.wallet.internal.ScaKbJwtClaims
 import eu.europa.ec.eudi.wallet.internal.getSessionTranscriptBytes
+import eu.europa.ec.eudi.wallet.internal.toKbJwtValue
 import eu.europa.ec.eudi.wallet.internal.verifiablePresentationForMsoMdoc
 import eu.europa.ec.eudi.wallet.internal.verifiablePresentationForSdJwtVc
+import java.util.UUID
 import eu.europa.ec.eudi.wallet.transfer.openId4vp.FORMAT_MSO_MDOC
 import eu.europa.ec.eudi.wallet.transfer.openId4vp.FORMAT_SD_JWT_VC
 import eu.europa.ec.eudi.wallet.transfer.openId4vp.OpenId4VpResponse
@@ -63,6 +67,13 @@ class ProcessedDcqlRequest(
     private val queryMap: RequestedDocumentsByQueryId,
     val msoMdocNonce: String,
 ) : RequestProcessor.ProcessedRequest.Success(RequestedDocuments(queryMap.flatMap { it.value.requestedDocuments })) {
+
+    /**
+     * Resolved transaction data from the authorization request, when the verifier supplied any.
+     */
+    val transactionData: List<TransactionData>?
+        get() = resolvedRequestObject.transactionData
+
     /**
      * Generates an OpenID4VP response with verifiable presentations for the selected documents.
      *
@@ -82,6 +93,37 @@ class ProcessedDcqlRequest(
     override fun generateResponse(
         disclosedDocuments: DisclosedDocuments,
         signatureAlgorithm: Algorithm?,
+    ): ResponseResult = generateResponseInternal(
+        disclosedDocuments = disclosedDocuments,
+        signatureAlgorithm = signatureAlgorithm,
+        scaKbJwtClaims = null,
+    )
+
+    /**
+     * Generates an OpenID4VP response for SCA attestations with TS12 KB-JWT claims.
+     *
+     * @param disclosedDocuments Documents selected by the user to disclose
+     * @param authenticationMethodsReferences TS12 `amr` array entries (at least two categories)
+     * @param signatureAlgorithm Algorithm to use for signing the presentations
+     */
+    fun generateScaResponse(
+        disclosedDocuments: DisclosedDocuments,
+        authenticationMethodsReferences: List<Map<String, String>>,
+        signatureAlgorithm: Algorithm? = null,
+    ): ResponseResult = generateResponseInternal(
+        disclosedDocuments = disclosedDocuments,
+        signatureAlgorithm = signatureAlgorithm,
+        scaKbJwtClaims = ScaKbJwtClaims(
+            jti = UUID.randomUUID().toString(),
+            responseMode = resolvedRequestObject.responseMode.toKbJwtValue(),
+            amr = authenticationMethodsReferences,
+        ),
+    )
+
+    private fun generateResponseInternal(
+        disclosedDocuments: DisclosedDocuments,
+        signatureAlgorithm: Algorithm?,
+        scaKbJwtClaims: ScaKbJwtClaims?,
     ): ResponseResult {
         val result = try {
             // Set to track all the documents that will be included in the response
@@ -104,9 +146,11 @@ class ProcessedDcqlRequest(
                         val verifiablePresentation = runBlocking {
                             vpFromRequestedDocuments(
                                 format = format,
+                                queryId = queryId,
                                 requestedDocuments = requestedDocuments,
                                 disclosedDocument = disclosedDocument,
-                                signatureAlgorithm = signatureAlgorithm ?: Algorithm.ESP256
+                                signatureAlgorithm = signatureAlgorithm ?: Algorithm.ESP256,
+                                scaKbJwtClaims = scaKbJwtClaims,
                             )
                         }
                         verifiablePresentationsForQueryId.add(verifiablePresentation)
@@ -149,9 +193,11 @@ class ProcessedDcqlRequest(
      */
     private suspend fun vpFromRequestedDocuments(
         format: String,
+        queryId: QueryId,
         requestedDocuments: RequestedDocuments,
         disclosedDocument: DisclosedDocument,
-        signatureAlgorithm: Algorithm
+        signatureAlgorithm: Algorithm,
+        scaKbJwtClaims: ScaKbJwtClaims?,
     ): VerifiablePresentation.Generic {
         val documentId = disclosedDocument.documentId
         // Retrieve the full document from the document manager
@@ -187,7 +233,9 @@ class ProcessedDcqlRequest(
                     resolvedRequestObject = resolvedRequestObject,
                     document = document,
                     disclosedDocument = disclosedDocument,
-                    signatureAlgorithm = signatureAlgorithm
+                    signatureAlgorithm = signatureAlgorithm,
+                    queryId = queryId,
+                    scaKbJwtClaims = scaKbJwtClaims,
                 )
             }
 

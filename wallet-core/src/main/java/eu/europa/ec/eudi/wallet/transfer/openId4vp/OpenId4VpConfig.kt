@@ -62,6 +62,7 @@ import java.net.URI
  * @property encryptionMethods List of supported encryption methods for content encryption
  * @property schemes URI schemes supported for OpenID4VP requests (default: "mdoc-openid4vp")
  * @property formats Supported credential formats (mDL/mDoc, SD-JWT VC, etc.)
+ * @property supportedTransactionDataTypes OpenID4VP transaction-data types the wallet accepts
  *
  * @see ClientIdScheme
  * @see EncryptionAlgorithm
@@ -84,6 +85,9 @@ class OpenId4VpConfig private constructor(private val builder: Builder) {
         get() = builder.schemes
 
     val formats: List<Format> = builder.formats
+
+    val supportedTransactionDataTypes: List<SupportedTransactionDataType> =
+        builder.supportedTransactionDataTypes
 
     /**
      * Builder for constructing [OpenId4VpConfig] instances with validation and sensible defaults.
@@ -195,6 +199,25 @@ class OpenId4VpConfig private constructor(private val builder: Builder) {
 
         lateinit var formats: List<Format>
             private set
+
+        var supportedTransactionDataTypes: List<SupportedTransactionDataType> = emptyList()
+            private set
+
+        /**
+         * Sets the OpenID4VP transaction-data types supported by the wallet.
+         */
+        fun withSupportedTransactionDataTypes(
+            supportedTransactionDataTypes: List<SupportedTransactionDataType>,
+        ) = apply {
+            this.supportedTransactionDataTypes = supportedTransactionDataTypes
+        }
+
+        /**
+         * Sets the OpenID4VP transaction-data types supported by the wallet.
+         */
+        fun withSupportedTransactionDataTypes(
+            vararg supportedTransactionDataTypes: SupportedTransactionDataType,
+        ) = withSupportedTransactionDataTypes(supportedTransactionDataTypes.toList())
 
         /**
          * Sets the supported credential formats for the OpenID4VP.
