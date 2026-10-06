@@ -547,7 +547,8 @@ internal suspend fun verifiablePresentationForSdJwtVc(
     documentManager: DocumentManager,
     keyUnlockData: KeyUnlockData?,
     audience: String? = null,
-    transactionData: List<ParsedTransactionData<*>> = emptyList()
+    transactionData: List<ParsedTransactionData<*>> = emptyList(),
+    scaKbJwtClaims: ScaKbJwtClaims? = null
 ): VerifiablePresentation.Generic {
     val document = match.credential.requireIssuedDocument(documentManager)
     return document.consumingCredential {
@@ -574,6 +575,7 @@ internal suspend fun verifiablePresentationForSdJwtVc(
                 unlockReason = PresentmentUnlockReason(this)
             )
             val transactionDataClaims = transactionData.transactionDataKeyBindingClaims()
+            val scaClaims = scaKbJwtClaims?.toKeyBindingClaims().orEmpty()
             withContext(keyUnlockData.asProvider()) {
                 filteredSdJwt.present(
                     signingKey = signingKey,
@@ -581,6 +583,7 @@ internal suspend fun verifiablePresentationForSdJwtVc(
                     audience = audience ?: resolvedRequestObject.client.id.clientId
                 ) {
                     transactionDataClaims.forEach { (claim, value) -> put(claim, value) }
+                    scaClaims.forEach { (claim, value) -> put(claim, value) }
                 }
             }.compactSerialization
         } else {

@@ -26,7 +26,9 @@ import eu.europa.ec.eudi.openid4vp.VerifiablePresentation
 import eu.europa.ec.eudi.openid4vp.VerifiablePresentations
 import eu.europa.ec.eudi.openid4vp.dcql.QueryId
 import eu.europa.ec.eudi.wallet.document.DocumentManager
+import eu.europa.ec.eudi.wallet.internal.ScaKbJwtClaims
 import eu.europa.ec.eudi.wallet.internal.getSessionTranscriptBytes
+import eu.europa.ec.eudi.wallet.internal.toKbJwtValue
 import eu.europa.ec.eudi.wallet.internal.verifiablePresentationForMsoMdoc
 import eu.europa.ec.eudi.wallet.internal.verifiablePresentationForSdJwtVc
 import eu.europa.ec.eudi.wallet.internal.requireIssuedDocument
@@ -41,6 +43,7 @@ import org.multipaz.presentment.CredentialSelection
 import org.multipaz.request.Requester
 import org.multipaz.securearea.KeyUnlockData
 import org.multipaz.trustmanagement.TrustMetadata
+import java.util.UUID
 
 /**
  * Implementation of [RequestProcessor.ProcessedRequest.Success] for DCQL OpenID4VP flows.
@@ -128,6 +131,51 @@ class ProcessedDcqlRequest(
         keyUnlockData: Map<String, KeyUnlockData>,
         sessionTranscriptProvider: (ResolvedRequestObject) -> ByteArray,
         sdJwtAudience: String?
+    ): ResponseResult = generateResponseInternal(
+        selection = selection,
+        keyUnlockData = keyUnlockData,
+        sessionTranscriptProvider = sessionTranscriptProvider,
+        sdJwtAudience = sdJwtAudience,
+        scaKbJwtClaims = null
+    )
+
+    /**
+     * Generates an OpenID4VP response for SCA attestations with TS12 KB-JWT claims
+     * (`jti`, `response_mode`, `amr`) added to SD-JWT VC key binding JWTs.
+     *
+     * @param authenticationMethodsReferences TS12 `amr` array entries (at least two categories)
+     */
+    suspend fun generateScaResponse(
+        selection: CredentialSelection,
+        keyUnlockData: Map<String, KeyUnlockData>,
+        authenticationMethodsReferences: List<Map<String, String>>,
+        sessionTranscriptProvider: (ResolvedRequestObject) -> ByteArray = { it.getSessionTranscriptBytes() },
+        sdJwtAudience: String? = null
+    ): ResponseResult {
+        val scaKbJwtClaims = try {
+            ScaKbJwtClaims(
+                jti = UUID.randomUUID().toString(),
+                responseMode = resolvedRequestObject.responseMode.toKbJwtValue(),
+                amr = authenticationMethodsReferences
+            )
+        } catch (e: IllegalArgumentException) {
+            return ResponseResult.Failure(e)
+        }
+        return generateResponseInternal(
+            selection = selection,
+            keyUnlockData = keyUnlockData,
+            sessionTranscriptProvider = sessionTranscriptProvider,
+            sdJwtAudience = sdJwtAudience,
+            scaKbJwtClaims = scaKbJwtClaims
+        )
+    }
+
+    private suspend fun generateResponseInternal(
+        selection: CredentialSelection,
+        keyUnlockData: Map<String, KeyUnlockData>,
+        sessionTranscriptProvider: (ResolvedRequestObject) -> ByteArray,
+        sdJwtAudience: String?,
+        scaKbJwtClaims: ScaKbJwtClaims?
     ): ResponseResult {
         // Confirm the user's consent-UI changes did not break the original DCQL
         // request — e.g. a deselected credential leaves a required query uncovered,
@@ -181,7 +229,8 @@ class ProcessedDcqlRequest(
                         documentManager = documentManager,
                         keyUnlockData = keyUnlockData[match.credential.identifier],
                         audience = sdJwtAudience,
-                        transactionData = match.transactionData
+                        transactionData = match.transactionData,
+                        scaKbJwtClaims = scaKbJwtClaims
                     )
 
                     else -> throw IllegalArgumentException("Unsupported format: $format")
