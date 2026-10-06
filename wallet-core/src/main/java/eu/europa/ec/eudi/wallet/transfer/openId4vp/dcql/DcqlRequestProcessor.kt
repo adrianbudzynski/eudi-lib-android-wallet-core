@@ -34,6 +34,7 @@ import eu.europa.ec.eudi.wallet.document.DocumentManager
 import eu.europa.ec.eudi.wallet.document.IssuedDocument
 import eu.europa.ec.eudi.wallet.document.format.DocumentFormat
 import eu.europa.ec.eudi.wallet.document.format.MsoMdocFormat
+import eu.europa.ec.eudi.wallet.document.format.SdJwtVcData
 import eu.europa.ec.eudi.wallet.document.format.SdJwtVcFormat
 import eu.europa.ec.eudi.wallet.internal.d
 import eu.europa.ec.eudi.wallet.internal.e
@@ -54,6 +55,7 @@ import eu.europa.ec.eudi.wallet.transfer.openId4vp.ReaderTrustResult
 import java.security.cert.X509Certificate
 import kotlinx.io.bytestring.ByteString
 import kotlinx.io.bytestring.decodeToString
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
@@ -270,6 +272,12 @@ class DcqlRequestProcessor(
 
             val credClaims: List<Claim> = runCatching {
                 secureCred.getClaims(documentTypeRepository = null)
+            }.recoverCatching { error ->
+                if (secureCred is SdJwtVcCredential && !secureCred.hasX5c()) {
+                    issuedDoc.sdJwtVcClaimsWithoutX5c()
+                } else {
+                    throw error
+                }
             }.getOrElse { return@mapNotNull null }
 
             // Resolve which subset of the verifier's `claims` this credential must
@@ -365,6 +373,35 @@ class DcqlRequestProcessor(
             SdJwt.fromCompactSerialization(this.issuerProvidedData.decodeToString())
                 .kbKey != null
         }.getOrElse { false }
+    }
+
+    private suspend fun SdJwtVcCredential.hasX5c(): Boolean {
+        return runCatching {
+            SdJwt.fromCompactSerialization(this.issuerProvidedData.decodeToString())
+                .x5c != null
+        }.getOrElse { true }
+    }
+
+    // Workaround: multipaz's SdJwtVcCredential.getClaims throws for an issuer-signed JWT without
+    // an `x5c` header, because it takes the issuer key from there to verify the signature. Issuers
+    // that identify their key by `kid` only (e.g. the Signicat PoC issuer) would otherwise never
+    // match a DCQL query. The claims come from the stored document data, which document-manager
+    // already read from the unverified issuer-signed JWT at issuance.
+    private fun IssuedDocument.sdJwtVcClaimsWithoutX5c(): List<Claim> {
+        val data = data as? SdJwtVcData
+            ?: throw IllegalStateException("Document $id has no SD-JWT VC data")
+        return data.claims.mapNotNull { claim ->
+            val name = claim.claimName ?: return@mapNotNull null
+            JsonClaim(
+                displayName = name,
+                attribute = null,
+                vct = data.format.vct,
+                claimPath = JsonArray(listOf(JsonPrimitive(name))),
+                value = claim.rawValue.takeIf { it.isNotEmpty() }
+                    ?.let { Json.parseToJsonElement(it) }
+                    ?: JsonNull,
+            )
+        }
     }
 
     /**

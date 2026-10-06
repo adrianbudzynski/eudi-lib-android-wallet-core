@@ -30,6 +30,8 @@ import eu.europa.ec.eudi.iso18013.transfer.response.ReaderAuthPolicy
 import eu.europa.ec.eudi.wallet.document.DocumentManager
 import eu.europa.ec.eudi.wallet.document.IssuedDocument
 import eu.europa.ec.eudi.wallet.document.format.DocumentFormat
+import eu.europa.ec.eudi.wallet.document.format.SdJwtVcClaim
+import eu.europa.ec.eudi.wallet.document.format.SdJwtVcData
 import eu.europa.ec.eudi.wallet.document.format.SdJwtVcFormat
 import eu.europa.ec.eudi.wallet.transfer.openId4vp.OpenId4VpReaderTrust
 import eu.europa.ec.eudi.wallet.transfer.openId4vp.OpenId4VpRequest
@@ -196,6 +198,43 @@ class DcqlRequestProcessorHolderBindingTest {
     }
     
     /**
+     * multipaz's `getClaims` throws for an issuer-signed JWT without an `x5c` header. The claims
+     * then come from the stored document data, so the credential still matches.
+     */
+    @Test
+    fun `sdjwt without x5c matches using the stored document claims`(): Unit = runBlocking {
+        val vct = "urn:eudi:pid:1"
+
+        val dcql = DCQL(
+            credentials = Credentials(
+                listOf(
+                    CredentialQuery.sdJwtVc(
+                        id = QueryId("query_0"),
+                        sdJwtVcMeta = DCQLMetaSdJwtVcExtensions(vctValues = listOf(vct)),
+                        claims = listOf(
+                            ClaimsQuery.sdJwtVc(
+                                path = ClaimPath(listOf(ClaimPathElement.Claim("family_name"))),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+            credentialSets = null,
+        )
+
+        val processor = buildProcessor(
+            vct = vct,
+            credentialClaims = null,
+            issuerSignedJwt = buildSdJwtCompactSerialization(includeCnf = true),
+        )
+
+        val processed = processor.process(buildOpenId4VpRequest(dcql))
+
+        val success = assertIs<ProcessedDcqlRequest>(processed)
+        assertEquals(1, success.flatMatches().size)
+    }
+
+    /**
      * Builds a parseable SD-JWT compact serialization. `kbKey` is derived from the
      * issuer-signed JWT's `cnf` claim via pure JSON parsing — the signature is not
      * verified, so an arbitrary placeholder suffices for these tests.
@@ -230,18 +269,25 @@ class DcqlRequestProcessorHolderBindingTest {
      */
     private fun buildProcessor(
         vct: String,
-        credentialClaims: List<Claim>,
+        credentialClaims: List<Claim>?,
         issuerSignedJwt: String,
     ): DcqlRequestProcessor {
         val credential = mockk<SecureAreaBoundCredential>(
             moreInterfaces = arrayOf(SdJwtVcCredential::class),
         )
-        coEvery { credential.getClaims(documentTypeRepository = null) } returns credentialClaims
+        if (credentialClaims != null) {
+            coEvery { credential.getClaims(documentTypeRepository = null) } returns credentialClaims
+        } else {
+            coEvery { credential.getClaims(documentTypeRepository = null) } throws
+                IllegalStateException("Only X509-certified keys are supported in SD-JWT")
+        }
         every { (credential as SdJwtVcCredential).issuerProvidedData } returns
             ByteString(issuerSignedJwt.toByteArray())
 
         val issuedDoc = mockk<IssuedDocument> {
             every { format } returns SdJwtVcFormat(vct) as DocumentFormat
+            every { id } returns "doc-1"
+            every { data } returns storedData(vct)
             coEvery { findCredential(now = any()) } returns credential
         }
         val documentManager = mockk<DocumentManager> {
@@ -254,6 +300,20 @@ class DcqlRequestProcessorHolderBindingTest {
             every { readerTrustStore = any() } returns Unit
         }
         return DcqlRequestProcessor(documentManager, trust, ReaderAuthPolicy.DoNotEnforce)
+    }
+
+    private fun storedData(vct: String): SdJwtVcData = mockk {
+        every { format } returns SdJwtVcFormat(vct)
+        every { claims } returns listOf(
+            SdJwtVcClaim(
+                pathElement = eu.europa.ec.eudi.sdjwt.vc.ClaimPathElement.Claim("family_name"),
+                value = "Doe",
+                rawValue = "\"Doe\"",
+                issuerMetadata = null,
+                selectivelyDisclosable = true,
+                children = emptyList(),
+            ),
+        )
     }
 
     private fun buildOpenId4VpRequest(dcql: DCQL): OpenId4VpRequest {
